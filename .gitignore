@@ -1,0 +1,7 @@
+.venv
+.env
+__pycache__
+bq.py
+credentials.json
+gmail-creds.json
+serviceAccountKey.json
