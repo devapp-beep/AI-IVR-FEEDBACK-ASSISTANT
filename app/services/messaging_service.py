@@ -88,9 +88,9 @@ class FeedbackHandler:
 
         if mood == "positive" and should_send_review_link:
             sms_text = (
-                f"Hi {caller_name}, \nCynet Health would love your feedback. "
-                f"Please highlight {feedback_for}'s name if you like. "
-                f"https://g.page/r/CRTB-dlkui5UEBE/review"
+                f"Hi there, \nCynet Health would appreciate your feedback."
+                f"You can highlight our employee’s name if you wish. Click on the link below 👇.\n "
+                f"https://tinyurl.com/cynetreview"
             )
             FeedbackHandler.sms_queue.put({
                 "to": contact_number,
