@@ -18,7 +18,8 @@ def vapi_tools():
 
         print("[bold magenta]Received Vapi payload[/bold magenta]")
         results = FeedbackHandler.paste_feedback_data(body)
-        return jsonify({"results": results})
+        print("[bold green]Results:[/bold green]", results)
+        return jsonify({"status": "success"}), 200
     except Exception as e:
         print(f"[bold red]Global Handler Error:[/bold red] {e}")
         return jsonify({"error": f"Internal Server Error: {str(e)}"}), 500

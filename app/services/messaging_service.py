@@ -8,6 +8,8 @@ from flask import jsonify
 
 class FeedbackHandler:
     sms_queue = queue.Queue()
+    last_sms_sent = {}
+    SMS_COOLDOWN_SECONDS = 100 
     TEXTLINE_TOKEN = os.getenv("TEXTLINE_API_KEY")  # Store safely in .env
     URL_EMAIL = os.getenv("URL_EMAIL")
     EMAIL_TO = os.getenv("EMAIL_TO")
@@ -29,14 +31,14 @@ class FeedbackHandler:
             should_send_review_link = args.get("should_send_review_link", False)
             same_number = args.get("should_send_same_number", True)
             print( "[bold yellow] same_number", same_number)
-            if same_number:
+            if same_number is True and call_number is not None:
                 contact_number = call_number
             if contact_number is None or contact_number == "" or contact_number == "null" or contact_number == "None":
                 contact_number = call_number
 
         except Exception as e: 
             print("❌ Error parsing data:", e)
-            return jsonify({"status": "error", "message": "Invalid data format"}), 500
+            return jsonify({"status": "error", "message": "Invalid data format"}), 200
 
 
         try:
@@ -46,7 +48,7 @@ class FeedbackHandler:
                 "subject": f"{mood.title()} Feedback from {caller_name} for {feedback_for}",
                 "body": f"{caller_name} called my feedback line from the number {contact_number} "
                         f"to leave a feedback for {feedback_for}.",
-                "summary": f" {feedback} and {objective}",
+                "summary": f" {objective}.{feedback}",
             }
             headers = {
                 "Content-Type": "application/json",
@@ -59,11 +61,11 @@ class FeedbackHandler:
                 print(f"❌ Failed to send email: {email_response.text}")
         except Exception as e:
             print(f"⚠️ Error sending email: {e}")
-            return jsonify({"status": "error", "message": "Error sending email"}), 500
+            return jsonify({"status": "error", "error": "Error sending email"}), 200
         # SMS validation
         if not contact_number:
             print("❌ Missing phone number")
-            return jsonify({"status": "error", "message": "Missing phone number, ask for email"}), 400
+            return jsonify({"status": "error", "error": "Missing phone number, ask for email"}), 200
 
 
         contact_number = str(contact_number).strip()
@@ -76,10 +78,17 @@ class FeedbackHandler:
             print(f"❌ Phone number not E.164 compliant: {contact_number}")
             return {"status": "error", "message": "Invalid number, ask for email"}
 
+
         # Send SMS only when mood is positive and should_send_review_link is True
+        now = time.time()
+        last_sent_time = FeedbackHandler.last_sms_sent.get(contact_number, 0)
+        if now - last_sent_time < FeedbackHandler.SMS_COOLDOWN_SECONDS:
+            print(f"ℹ️ SMS not sent (cooldown active for {contact_number})")
+            return jsonify({"status": "success", "message": "SMS sent, but cooldown active"}), 200;
+
         if mood == "positive" and should_send_review_link:
             sms_text = (
-                f"Hi {caller_name}, Cynet Health would love your feedback. "
+                f"Hi {caller_name}, \nCynet Health would love your feedback. "
                 f"Please highlight {feedback_for}'s name if you like. "
                 f"https://g.page/r/CRTB-dlkui5UEBE/review"
             )
@@ -87,6 +96,7 @@ class FeedbackHandler:
                 "to": contact_number,
                 "text": sms_text
             })
+            FeedbackHandler.last_sms_sent[contact_number] = now
             print(f"📩 Queued Textline message to {contact_number}")
         else:
             print(f"ℹ️ SMS not sent (mood={mood}, should_send_review_link={should_send_review_link})")
