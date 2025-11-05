@@ -42,13 +42,19 @@ class FeedbackHandler:
 
 
         try:
+            summary_parts = []
+            if objective:
+                summary_parts.append(objective)
+            if feedback:
+                summary_parts.append(feedback)
+            summary_text = ". ".join(summary_parts) if summary_parts else ""
             # Always send email, regardless of mood or link flag
             email_payload = {
                 "email": FeedbackHandler.EMAIL_TO,
                 "subject": f"{mood.title()} Feedback from {caller_name} for {feedback_for}",
                 "body": f"{caller_name} called my feedback line from the number {contact_number} "
                         f"to leave a feedback for {feedback_for}.",
-                "summary": f" {objective}.{feedback}",
+                "summary": summary_text,
             }
             headers = {
                 "Content-Type": "application/json",
@@ -88,9 +94,10 @@ class FeedbackHandler:
 
         if mood == "positive" and should_send_review_link:
             sms_text = (
-                f"Hi there, \nCynet Health would appreciate your feedback."
+                f"Hi {caller_name}, \nCynet Health would appreciate your feedback."
                 f"You can highlight our employee’s name if you wish. Click on the link below 👇.\n "
-                f"https://tinyurl.com/cynetreview"
+                f"https://tinyurl.com/cynetreview \nthank you!. "
+                
             )
             FeedbackHandler.sms_queue.put({
                 "to": contact_number,
