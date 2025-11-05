@@ -93,10 +93,11 @@ class FeedbackHandler:
             return jsonify({"status": "success", "message": "SMS sent, but cooldown active"}), 200;
 
         if mood == "positive" and should_send_review_link:
+            first_name = caller_name.split()[0].capitalize()
             sms_text = (
-                f"Hi {caller_name}, \nCynet Health would appreciate your feedback."
-                f"You can highlight our employee’s name if you wish. Click on the link below 👇.\n "
-                f"https://tinyurl.com/cynetreview \nthank you!. "
+                f"Hi {first_name}, \n \nCynet Health would appreciate your feedback."
+                f"You can highlight our employee’s name if you wish. Please click on the link below.\n"
+                f"\nhttps://tinyurl.com/cynetreview \n \nThanks!!"
                 
             )
             FeedbackHandler.sms_queue.put({
