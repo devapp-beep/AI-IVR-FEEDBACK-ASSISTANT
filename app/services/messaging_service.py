@@ -5,6 +5,7 @@ import queue
 import requests
 import re
 from flask import jsonify
+from google.cloud import bigquery
 
 class FeedbackHandler:
     sms_queue = queue.Queue()
@@ -13,6 +14,34 @@ class FeedbackHandler:
     TEXTLINE_TOKEN = os.getenv("TEXTLINE_API_KEY")  # Store safely in .env
     URL_EMAIL = os.getenv("URL_EMAIL")
     EMAIL_TO = os.getenv("EMAIL_TO")
+    project_id = os.getenv("GCLOUD_PROJECT")
+    print("project_id", project_id)
+    dataset_id = os.getenv("GCLOUD_DATASET_ID")
+    table_id = os.getenv("GCLOUD_TABLE", "recruiters_nxs")
+    VALID_DOMAINS = [
+           "cynetsystems.com",
+           "cynethealth.com",
+           "cynetcorp.com",
+           "cynetlocums.com",
+    ]
+    DOMAIN_FIXES = {
+        "sainetsystems.com": "cynetsystems.com",
+        "sianetsystems.com": "cynetsystems.com",
+        "sainethealth.com": "cynethealth.com",
+        "sianethealth.com": "cynethealth.com",
+        "sainetcorp.com": "cynetcorp.com",
+        "sianetcorp.com": "cynetcorp.com",
+        "sainetlocums.com": "cynetlocums.com",
+        "sianetlocums.com": "cynetlocums.com",
+
+    }
+    
+    @staticmethod
+    def create_bigquery_client():
+        keyfile_path = "credentials.json"
+        if not keyfile_path:
+            raise ValueError("Service account key file not found. Set GCLOUD_KEYFILE.")
+        return bigquery.Client.from_service_account_json(keyfile_path)
 
     @staticmethod
     def paste_feedback_data(data):
@@ -49,6 +78,8 @@ class FeedbackHandler:
                 summary_parts.append(feedback)
             summary_text = ". ".join(summary_parts) if summary_parts else ""
             # Always send email, regardless of mood or link flag
+            if caller_name is None or caller_name == "" or caller_name == "null" or caller_name == "Caller":
+                caller_name = "there"
             email_payload = {
                 "email": FeedbackHandler.EMAIL_TO,
                 "subject": f"{mood.title()} Feedback from {caller_name} for {feedback_for}",
@@ -95,7 +126,7 @@ class FeedbackHandler:
         if mood == "positive" and should_send_review_link:
             first_name = caller_name.split()[0].capitalize()
             sms_text = (
-                f"Hi {first_name}, \n \nCynet Health would appreciate your feedback."
+                f"Hi {first_name}, \n \nCynet Health would appreciate your feedback. "
                 f"You can highlight our employee’s name if you wish. Please click on the link below.\n"
                 f"\nhttps://tinyurl.com/cynetreview \n \nThanks!!"
                 
@@ -149,3 +180,318 @@ class FeedbackHandler:
 
             FeedbackHandler.sms_queue.task_done()
             time.sleep(0.5)
+
+    def normalize_name(name):
+        """Normalize spoken name from voice / chat"""
+        if not name:
+            return ""
+        name = name.lower().strip()
+        name = re.sub(r'[^a-z ]', '', name)      # remove symbols
+        name = re.sub(r'\s+', ' ', name)         # normalize spaces
+        return name
+    
+    def normalize_domain(email):
+        if "@" not in email:
+            return email
+        local, domain = email.split("@", 1)
+        domain = FeedbackHandler.DOMAIN_FIXES.get(domain, domain)
+        domain = re.sub(r"(sai|sia|sei)[\-\s]?net", "cynet", domain)
+        if domain not in FeedbackHandler.VALID_DOMAINS:
+            raise ValueError("Invalid company domain")
+        return f"{local}@{domain}"
+   
+    def get_recruiter_info(data):
+        print("in get_recruiter_info", data)
+
+        tool_call = data.get("message", {}).get("toolCalls", [])[0]
+        args = tool_call["function"]["arguments"]
+        toll_call_id = tool_call.get("id")
+        print("toll_call_id", toll_call_id)
+
+        # Accept inputs
+        spoken_name = FeedbackHandler.normalize_name(args.get("recruiterName", ""))
+        received_email = args.get("recruiterEmail", "").strip().lower()
+        spoken_number = args.get("recruiterNumber", "")
+        print("received_number", spoken_number)
+        spoken_email = FeedbackHandler.normalize_domain(received_email)
+        if not spoken_name and not spoken_email and not spoken_number:
+            return jsonify({
+                "status": "error",
+                "message": "Recruiter name, email or number is required"
+            }), 400
+        print("before client creation")    
+
+        client = FeedbackHandler.create_bigquery_client()
+        print("after client creation", client)
+
+        # --------------------------------
+        # CASE 1: EMAIL ONLY (Exact match)
+        # --------------------------------
+        if spoken_email and not spoken_name and not spoken_number:
+
+            query = f"""
+                SELECT name, email, id, active
+                FROM `{FeedbackHandler.project_id}.{FeedbackHandler.dataset_id}.{FeedbackHandler.table_id}`
+                WHERE LOWER(email) = @email
+                And active is True
+            """
+
+            job_config = bigquery.QueryJobConfig(
+                query_parameters=[
+                    bigquery.ScalarQueryParameter("email", "STRING", spoken_email)
+                ]
+            )
+        # --------------------------------
+        # CASE 2: NUMBER ONLY (Exact match)
+        # --------------------------------
+        elif spoken_number:
+            query = f"""
+                SELECT name, email, id, active
+                FROM `{FeedbackHandler.project_id}.{FeedbackHandler.dataset_id}.{FeedbackHandler.table_id}`
+                WHERE phone = @phone
+            """
+            job_config = bigquery.QueryJobConfig(
+                query_parameters=[
+                    bigquery.ScalarQueryParameter("phone", "STRING", spoken_number)
+                ]
+            )
+
+        # --------------------------------
+        # CASE 2: NAME ONLY (ADVANCED FUZZY - WORD-LEVEL MATCHING)
+        # --------------------------------
+        elif spoken_name and not spoken_email:
+
+            query = f"""
+                WITH name_parts AS (
+                    SELECT
+                        name,
+                        email,
+                        id,
+                        active,
+                        LOWER(name) AS name_lower,
+                        SPLIT(LOWER(name), ' ') AS name_words,
+                        @name AS spoken_name,
+                        SPLIT(@name, ' ') AS spoken_words
+                    FROM `{FeedbackHandler.project_id}.{FeedbackHandler.dataset_id}.{FeedbackHandler.table_id}`
+                    WHERE active is True
+                ),
+                scored_names AS (
+                    SELECT
+                        name,
+                        email,
+                        id,
+                        active,
+                        name_lower,
+                        spoken_name,
+                        name_words,
+                        spoken_words,
+                        
+                        -- Full string fuzzy match
+                        EDIT_DISTANCE(name_lower, spoken_name) AS full_lev,
+                        
+                        -- First word match (first name) - exact distance
+                        CASE 
+                            WHEN ARRAY_LENGTH(name_words) > 0 AND ARRAY_LENGTH(spoken_words) > 0 
+                            THEN EDIT_DISTANCE(name_words[OFFSET(0)], spoken_words[OFFSET(0)])
+                            ELSE 999
+                        END AS first_word_lev,
+                        
+                        -- Second word match (last name) - exact distance if both have second words
+                        CASE 
+                            WHEN ARRAY_LENGTH(name_words) > 1 AND ARRAY_LENGTH(spoken_words) > 1 
+                            THEN EDIT_DISTANCE(name_words[OFFSET(1)], spoken_words[OFFSET(1)])
+                            WHEN ARRAY_LENGTH(name_words) > 1 AND ARRAY_LENGTH(spoken_words) = 1 
+                            THEN 0  -- Spoken has only first name, that's OK
+                            ELSE 999
+                        END AS second_word_lev,
+                        
+                        -- Check if first word matches (exact, fuzzy, or prefix)
+                        CASE 
+                            WHEN ARRAY_LENGTH(name_words) > 0 AND ARRAY_LENGTH(spoken_words) > 0 
+                            THEN name_words[OFFSET(0)] = spoken_words[OFFSET(0)] 
+                                 OR EDIT_DISTANCE(name_words[OFFSET(0)], spoken_words[OFFSET(0)]) <= 3
+                                 OR STARTS_WITH(name_words[OFFSET(0)], spoken_words[OFFSET(0)])
+                                 OR STARTS_WITH(spoken_words[OFFSET(0)], name_words[OFFSET(0)])
+                            ELSE FALSE
+                        END AS first_word_match,
+                        
+                        -- Check if second word matches (when both have second words)
+                        CASE 
+                            WHEN ARRAY_LENGTH(name_words) > 1 AND ARRAY_LENGTH(spoken_words) > 1 
+                            THEN name_words[OFFSET(1)] = spoken_words[OFFSET(1)] 
+                                 OR EDIT_DISTANCE(name_words[OFFSET(1)], spoken_words[OFFSET(1)]) <= 3
+                                 OR STARTS_WITH(name_words[OFFSET(1)], spoken_words[OFFSET(1)])
+                                 OR STARTS_WITH(spoken_words[OFFSET(1)], name_words[OFFSET(1)])
+                            WHEN ARRAY_LENGTH(name_words) > 1 AND ARRAY_LENGTH(spoken_words) = 1 
+                            THEN TRUE  -- Only first name spoken, that's acceptable
+                            ELSE TRUE  -- No second word in either, consider it a match
+                        END AS second_word_match,
+                        
+                        -- Check if spoken name is prefix of full name (shivani -> shivani sati)
+                        STARTS_WITH(name_lower, spoken_name) AS prefix_match,
+                        
+                        -- Check if full name contains spoken name
+                        name_lower LIKE CONCAT('%', spoken_name, '%') AS contains_match
+                        
+                    FROM name_parts
+                )
+                SELECT
+                    name,
+                    email,
+                    id,
+                    active,
+                    full_lev,
+                    first_word_lev,
+                    second_word_lev,
+                    first_word_match,
+                    second_word_match,
+                    prefix_match,
+                    contains_match
+                FROM scored_names
+                WHERE
+                    -- Match conditions (flexible matching):
+                    -- 1. First word matches (exact, fuzzy within 3 chars, or prefix)
+                    --    AND (second word matches OR prefix match OR full string close)
+                    (
+                        first_word_match = TRUE
+                        AND (
+                            second_word_match = TRUE
+                            OR prefix_match = TRUE
+                            OR full_lev <= 4
+                        )
+                    )
+                    -- 2. OR full string is reasonably close (handles typos in first word)
+                    OR full_lev <= 4
+                    -- 3. OR prefix match (handles partial names)
+                    OR prefix_match = TRUE
+                ORDER BY
+                    -- Priority: 
+                    -- 1. Exact first word match
+                    CASE WHEN first_word_lev = 0 THEN 1 ELSE 2 END,
+                    -- 2. Prefix match (partial first name)
+                    prefix_match DESC,
+                    -- 3. Exact second word match
+                    CASE WHEN second_word_lev = 0 THEN 1 ELSE 2 END,
+                    -- 4. Then by fuzzy distances
+                    first_word_lev ASC,
+                    second_word_lev ASC,
+                    full_lev ASC
+                LIMIT 10
+            """
+
+            job_config = bigquery.QueryJobConfig(
+                query_parameters=[
+                    bigquery.ScalarQueryParameter("name", "STRING", spoken_name)
+                ]
+            )
+
+        # --------------------------------
+        # CASE 3: EMAIL + NAME (VERIFY BOTH)
+        # --------------------------------
+        else:
+
+            query = f"""
+                SELECT
+                    name,
+                    email,
+                    id,
+                    active,
+
+                    EDIT_DISTANCE(LOWER(name), @name) AS lev,
+                    STARTS_WITH(LOWER(name), @name) AS prefix_match
+
+                FROM `{FeedbackHandler.project_id}.{FeedbackHandler.dataset_id}.{FeedbackHandler.table_id}`
+
+                WHERE
+                    LOWER(email) = @email
+                    AND (
+                        EDIT_DISTANCE(LOWER(name), @name) <= 3
+                        OR STARTS_WITH(LOWER(name), @name)
+                    )
+                    And active is True
+
+                ORDER BY
+                    prefix_match DESC,
+                    lev ASC
+               
+            """
+
+            job_config = bigquery.QueryJobConfig(
+                query_parameters=[
+                    bigquery.ScalarQueryParameter("email", "STRING", spoken_email),
+                    bigquery.ScalarQueryParameter("name", "STRING", spoken_name)
+                ]
+            )
+
+        # --------------------------------
+        # EXECUTE QUERY
+        # --------------------------------
+        print("before query execution")
+        rows = list(client.query(query, job_config=job_config).result())
+        print("after query execution")
+        # --------------------------------
+        # HANDLE NO RESULT
+        # --------------------------------
+        if not rows:
+            vapi_response = {
+                "results": [
+                    {
+                        "toolCallId": toll_call_id,
+                        "result": {
+                            "status": "not_found",
+                            "message": "No recruiter found"
+                        }
+                    }
+                ]
+            }
+            return jsonify(vapi_response), 404
+
+        # --------------------------------
+        # FORMAT RESPONSE
+        # --------------------------------
+        results = []
+        for row in rows:
+            results.append({
+                "name": row.get("name"),
+                "email": row.get("email"),
+                "id": row.get("id"),
+                "active_status": row.get("active"),
+               
+            })
+        print("results are= ", results)
+
+        # --------------------------------
+        # MULTI MATCH CONFIRMATION
+        # --------------------------------
+        if len(results) > 1:
+            vapi_response = {
+                "results":[
+                    {
+                        "toolCallId": toll_call_id,
+                        "result": {
+                            "status": "confirm",
+                            "message": "Multiple recruiters found. Please confirm:",
+                            "candidates": results[:5]
+                        }
+                    }
+                ]
+            }
+            return jsonify(vapi_response), 200
+
+        # --------------------------------
+        # SINGLE MATCH SUCCESS
+        # --------------------------------
+        vapi_response = {
+            "results": [
+                {
+                    "toolCallId": toll_call_id,
+                    "result": {
+                        "status": "success",
+                        "message": "Recruiter identified successfully",
+                        "data": results[0]
+                    }
+                }
+            ]
+        }
+        return jsonify(vapi_response), 200
+
