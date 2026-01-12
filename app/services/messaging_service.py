@@ -625,7 +625,7 @@ class FeedbackHandler:
             recruiter_contact = args.get("internal number")
 
             message = (
-                f"Hello Below is the recruiter details you were looking for:- \n\n"
+                f"Hello, below is the recruiter details you were looking for:- \n\n"
                 f"Name: {recruiter_name}\n"
                 f"Email: {recruiter_email}\n"
                 f"Contact: {recruiter_contact}\n"
