@@ -410,9 +410,9 @@ class FeedbackHandler:
                     -- 3. Exact second word match
                     CASE WHEN SECOND_WORD_LEV = 0 THEN 1 ELSE 2 END,
                     -- 4. Then by fuzzy distances
-                    FIRST_WORD_LEV_ASC,
+                    FIRST_WORD_LEV ASC,
                     SECOND_WORD_LEV ASC,
-                    FULL_LEV_ASC
+                    FULL_LEV ASC
                 LIMIT 10
             """
             job_config = bigquery.QueryJobConfig(
