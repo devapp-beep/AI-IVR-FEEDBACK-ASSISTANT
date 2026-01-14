@@ -56,6 +56,8 @@ class FeedbackHandler:
             contact_number = args.get("contact_number")
             mood = args.get("Mood", "").strip().lower()
             objective = args.get("Objective")
+            recruiter_name = args.get("recruiter_name")
+            recruiter_email = args.get("recruiter_email")
             feedback = args.get("feedback_Summary") or args.get("feedback_summary")
             feedback_for = args.get("feedback_for")
             should_send_review_link = args.get("should_send_review_link", False)
@@ -81,8 +83,23 @@ class FeedbackHandler:
             # Always send email, regardless of mood or link flag
             if caller_name is None or caller_name == "" or caller_name == "null" or caller_name == "Caller":
                 caller_name = "there"
+            # of recruiter email incluse domain cynetcorp than i want the EMAIL_TO value to be myfeedback@cyentcorp.com if the domain is cynetlocums than i want the EMAIL_TO value to be myfeedback@cynetlocums.com if the domain is cynethealth than i want the EMAIL_TO value to be myfeedback@cynethealth.com and if cynetsystems than i want the EMAIL_TO value to be myfeedback@cynetsystems.com
+            if recruiter_email:
+                domain = recruiter_email.split("@")[-1]
+                if domain == "cynetcorp.com":
+                    EMAIL_TO_REC = "myfeedback@cynetcorp.com"
+                elif domain == "cynetlocums.com":
+                    EMAIL_TO_REC = "myfeedback@cynetlocums.com"
+                elif domain == "cynethealth.com":
+                    EMAIL_TO_REC = "myfeedback@cynethealth.com"
+                elif domain == "cynetsystems.com":
+                    EMAIL_TO_REC = "myfeedback@cynetsystems.com"
+            else: 
+                EMAIL_TO_REC = FeedbackHandler.EMAIL_TO
             email_payload = {
-                "email": FeedbackHandler.EMAIL_TO,
+
+                #  use the above conditional mail here to send the mail
+                "email": EMAIL_TO_REC,
                 "subject": f"{mood.title()} Feedback from {caller_name} for {feedback_for}",
                 "body": f"{caller_name} called my feedback line from the number {contact_number} "
                         f"to leave a feedback for {feedback_for}.",
