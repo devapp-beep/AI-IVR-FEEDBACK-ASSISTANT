@@ -87,7 +87,7 @@ class FeedbackHandler:
             if recruiter_email:
                 domain = recruiter_email.split("@")[-1]
                 if domain == "cynetcorp.com":
-                    EMAIL_TO_REC = "myfeedback5@cynetcorp.com"
+                    EMAIL_TO_REC = "myfeedback@cynetcorp.com"
                 elif domain == "cynetlocums.com":
                     EMAIL_TO_REC = "myfeedback@cynetlocums.com"
                 elif domain == "cynethealth.com":
