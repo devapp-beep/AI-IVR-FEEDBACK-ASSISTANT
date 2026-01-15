@@ -45,6 +45,33 @@ class FeedbackHandler:
             raise ValueError("Service account key file not found. Set GCLOUD_KEYFILE.")
         return bigquery.Client.from_service_account_json(keyfile_path)
 
+    def get_immediate_manager_email(recruiter_email):
+        client = FeedbackHandler.create_bigquery_client()
+
+        query = """
+            SELECT
+                m.email AS immediate_manager_email
+            FROM `cynetdatabase.Department_Data.Ph and India` e
+            JOIN `cynetdatabase.Department_Data.Ph and India` m
+                ON LOWER(e.immediate_manager) = LOWER(m.goes_by_name)
+            WHERE LOWER(e.email) = LOWER(@email)
+            LIMIT 1
+        """
+
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ScalarQueryParameter("email", "STRING", recruiter_email)
+            ]
+        )
+
+        try:
+            rows = client.query(query, job_config=job_config).result()
+            for row in rows:
+                return row.immediate_manager_email
+        except Exception as e:
+            print(f"⚠️ Error querying immediate manager email: {e}")
+        return None
+
     @staticmethod
     def paste_feedback_data(data):
 
@@ -88,28 +115,67 @@ class FeedbackHandler:
                 domain = recruiter_email.split("@")[-1]
                 if domain == "cynetcorp.com":
                     EMAIL_TO_REC = "myfeedback@cynetcorp.com"
+                    CC_SENIOR = os.getenv("CC_SENIOR_CORP")
+                    CC_MANAGER = FeedbackHandler.get_immediate_manager_email(recruiter_email)
                 elif domain == "cynetlocums.com":
                     EMAIL_TO_REC = "myfeedback@cynetlocums.com"
+                    CC_MANAGER = FeedbackHandler.get_immediate_manager_email(recruiter_email)
+                    CC_SENIOR = os.getenv("CC_SENIOR_LOCUMS")
                 elif domain == "cynethealth.com":
                     EMAIL_TO_REC = "myfeedback@cynethealth.com"
+                    CC_MANAGER = FeedbackHandler.get_immediate_manager_email(recruiter_email)
+                    CC_SENIOR = os.getenv("CC_SENIOR_HEALTH")
                 elif domain == "cynetsystems.com":
                     EMAIL_TO_REC = "myfeedback@cynetsystems.com"
-            else: 
+                    CC_MANAGER = FeedbackHandler.get_immediate_manager_email(recruiter_email)
+                    CC_SENIOR = os.getenv("CC_SENIOR_SYSTEMS")
+            else:
+                recruiter_email = FeedbackHandler.EMAIL_TO
                 EMAIL_TO_REC = FeedbackHandler.EMAIL_TO
-            email_payload = {
+                CC_MANAGER = ""
+                CC_SENIOR = ""
 
-                #  use the above conditional mail here to send the mail
-                "email": EMAIL_TO_REC,
-                "subject": f"{mood.title()} Feedback from {caller_name} for {feedback_for}",
-                "body": f"{caller_name} called my feedback line from the number {contact_number} "
-                        f"to leave a feedback for {feedback_for}.",
-                "summary": summary_text,
-            }
-            headers = {
-                "Content-Type": "application/json",
-                "Accept": "application/json"
-            }
-            email_response = requests.post(FeedbackHandler.URL_EMAIL, headers=headers, json=email_payload, timeout=10)
+            if mood == "positive" or mood == "neutral":
+                # Build a proper CC list (exclude empty values)
+                cc_list = []
+                if CC_MANAGER:
+                    cc_list.append(CC_MANAGER)
+                if EMAIL_TO_REC and EMAIL_TO_REC != recruiter_email:
+                    cc_list.append(EMAIL_TO_REC)
+
+                email_payload = {
+                    #  use the above conditional mail here to send the mail
+                    "email": recruiter_email,
+                    "cc_emails": cc_list,
+                    "subject": f"{mood.title()} Feedback from {caller_name} for {feedback_for}",
+                    "body": f"{caller_name} called my feedback line from the number {contact_number} "
+                            f"to leave a feedback for {feedback_for}.",
+                    "summary": summary_text,
+                }
+                headers = {
+                    "Content-Type": "application/json",
+                    "Accept": "application/json"
+                }
+                email_response = requests.post(FeedbackHandler.URL_EMAIL, headers=headers, json=email_payload, timeout=10)
+            if mood == "negative":
+                cc_list =[]
+                if CC_MANAGER:
+                    cc_list.append(CC_MANAGER)
+                if CC_SENIOR:
+                    cc_list.append(CC_SENIOR)
+                email_payload = {
+                    "email": EMAIL_TO_REC,
+                    "cc_emails": cc_list,
+                    "subject": f"{mood.title()} Feedback from {caller_name} for {feedback_for}",
+                    "body": f"{caller_name} called my feedback line from the number {contact_number} "
+                            f"to leave a feedback for {feedback_for}.",
+                    "summary": summary_text,
+                }
+                headers = {
+                    "Content-Type": "application/json",
+                    "Accept": "application/json"
+                }
+                email_response = requests.post(FeedbackHandler.URL_EMAIL, headers=headers, json=email_payload, timeout=10)
             if email_response.status_code in [200, 201]:
                 print(f"📧 Email sent successfully for {caller_name}")
             else:
@@ -427,9 +493,9 @@ class FeedbackHandler:
                     -- 3. Exact second word match
                     CASE WHEN SECOND_WORD_LEV = 0 THEN 1 ELSE 2 END,
                     -- 4. Then by fuzzy distances
-                    FIRST_WORD_LEV_ASC,
+                    FIRST_WORD_LEV ASC,
                     SECOND_WORD_LEV ASC,
-                    FULL_LEV_ASC
+                    FULL_LEV ASC
                 LIMIT 10
             """
             job_config = bigquery.QueryJobConfig(
