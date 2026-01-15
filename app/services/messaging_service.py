@@ -147,7 +147,7 @@ class FeedbackHandler:
                     #  use the above conditional mail here to send the mail
                     "email": recruiter_email,
                     "cc_emails": cc_list,
-                    "subject": f"{mood.title()} Feedback from {caller_name} for {feedback_for}",
+                    "subject": f"INTERNAL TOOL TESTING, PLEASE IGNORE {mood.title()} Feedback from {caller_name} for {feedback_for}",
                     "body": f"{caller_name} called my feedback line from the number {contact_number} "
                             f"to leave a feedback for {feedback_for}.",
                     "summary": summary_text,
@@ -166,7 +166,7 @@ class FeedbackHandler:
                 email_payload = {
                     "email": EMAIL_TO_REC,
                     "cc_emails": cc_list,
-                    "subject": f"{mood.title()} Feedback from {caller_name} for {feedback_for}",
+                    "subject": f"INTERNAL TOOL TESTING, PLEASE IGNORE {mood.title()} Feedback from {caller_name} for {feedback_for}",
                     "body": f"{caller_name} called my feedback line from the number {contact_number} "
                             f"to leave a feedback for {feedback_for}.",
                     "summary": summary_text,
