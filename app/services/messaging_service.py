@@ -295,6 +295,7 @@ class FeedbackHandler:
         if not phone:
             return phone
         
+        phone = str(phone).strip()
         # Remove all non-digit characters except +
         cleaned = re.sub(r'[^\d+]', '', str(phone).strip())
         
@@ -616,6 +617,7 @@ class FeedbackHandler:
         return jsonify(vapi_response), 200
     # function to normalize the call number, this should remove +  from the number if it is avaialble in the number
     def normalize_phone_number(number):
+        number = str(number).strip()
         if number.startswith("+"):
             number = number[1:]
         return number
