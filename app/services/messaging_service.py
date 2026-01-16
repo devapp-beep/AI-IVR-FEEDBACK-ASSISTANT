@@ -370,7 +370,7 @@ class FeedbackHandler:
             query = f"""
                 SELECT NAME, PRIMARY_EMAIL, STATUS, PHONE_NO
                 FROM `{FeedbackHandler.project_id}.{FeedbackHandler.dataset_id}.{FeedbackHandler.table_id}`
-                WHERE PHONE_NO = @PHONE_NO
+                WHERE PHONE_NO LIKE CONCAT('%', @PHONE_NO, '%')
             """
             job_config = bigquery.QueryJobConfig(
                 query_parameters=[
