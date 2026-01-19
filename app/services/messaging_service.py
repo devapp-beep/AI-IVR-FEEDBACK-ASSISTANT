@@ -147,7 +147,7 @@ class FeedbackHandler:
                     #  use the above conditional mail here to send the mail
                     "email": recruiter_email,
                     "cc_emails": cc_list,
-                    "subject": f"{mood.title()} Feedback from {caller_name} for {feedback_for}",
+                    "subject": f"INTERNAL TOOL TESTING, PLEASE IGNORE {mood.title()} Feedback from {caller_name} for {feedback_for}",
                     "body": f"{caller_name} called my feedback line from the number {contact_number} "
                             f"to leave a feedback for {feedback_for}.",
                     "summary": summary_text,
@@ -166,7 +166,7 @@ class FeedbackHandler:
                 email_payload = {
                     "email": EMAIL_TO_REC,
                     "cc_emails": cc_list,
-                    "subject": f"{mood.title()} Feedback from {caller_name} for {feedback_for}",
+                    "subject": f"INTERNAL TOOL TESTING, PLEASE IGNORE {mood.title()} Feedback from {caller_name} for {feedback_for}",
                     "body": f"{caller_name} called my feedback line from the number {contact_number} "
                             f"to leave a feedback for {feedback_for}.",
                     "summary": summary_text,
@@ -295,6 +295,7 @@ class FeedbackHandler:
         if not phone:
             return phone
         
+        phone = str(phone).strip()
         # Remove all non-digit characters except +
         cleaned = re.sub(r'[^\d+]', '', str(phone).strip())
         
@@ -369,7 +370,7 @@ class FeedbackHandler:
             query = f"""
                 SELECT NAME, PRIMARY_EMAIL, STATUS, PHONE_NO
                 FROM `{FeedbackHandler.project_id}.{FeedbackHandler.dataset_id}.{FeedbackHandler.table_id}`
-                WHERE PHONE_NO = @PHONE_NO
+                WHERE PHONE_NO LIKE CONCAT('%', @PHONE_NO, '%')
             """
             job_config = bigquery.QueryJobConfig(
                 query_parameters=[
@@ -616,6 +617,7 @@ class FeedbackHandler:
         return jsonify(vapi_response), 200
     # function to normalize the call number, this should remove +  from the number if it is avaialble in the number
     def normalize_phone_number(number):
+        number = str(number).strip()
         if number.startswith("+"):
             number = number[1:]
         return number
