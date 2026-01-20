@@ -14,6 +14,8 @@ def vapi_recruiter_info():
         body = request.get_json(silent=True)
         if not body:
             return jsonify({"error": "No JSON body received"}), 400
+        if not FeedbackHandler.verify_vapi_request():
+            return jsonify({"error": "Unauthorized"}), 401
         print("[bold magenta]Received Vapi payload[/bold magenta]")
         result, status_code = FeedbackHandler.get_recruiter_info(body)
         print("[bold green]Results:[/bold green]", result)
