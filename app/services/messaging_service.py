@@ -146,7 +146,7 @@ class FeedbackHandler:
                     EMAIL_TO_REC = "myfeedback@cynethealth.ca"
                     CC_MANAGER = FeedbackHandler.get_immediate_manager_email(recruiter_email)
                     # CC_SENIOR = os.getenv("CC_SENIOR_HEALTH_CA")
-                    REVIEW_LINK= "https://app.gatherup.com/f-143639"
+                    REVIEW_LINK= "https://g.page/r/CYh2_NAwTxTrEBM/review"
             else:
                 recruiter_email = FeedbackHandler.EMAIL_TO
                 EMAIL_TO_REC = FeedbackHandler.EMAIL_TO
