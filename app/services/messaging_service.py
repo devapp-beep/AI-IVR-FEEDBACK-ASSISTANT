@@ -4,7 +4,7 @@ import threading
 import queue
 import requests
 import re
-from flask import jsonify
+from flask import jsonify,request
 from google.cloud import bigquery
 
 class FeedbackHandler:
@@ -17,6 +17,7 @@ class FeedbackHandler:
     project_id = os.getenv("GCLOUD_PROJECT")
     call_data_project = os.getenv("GCLOUD_PROJECT_CALL_DATA")
     call_data_table = os.getenv("GCLOUD_TABLE_CALL_DATA")
+    VAPI_SECRET = os.getenv("VAPI_SECRET")
     print("project_id", project_id)
     dataset_id = os.getenv("GCLOUD_DATASET_ID")
     table_id = os.getenv("GCLOUD_TABLE", "recruiters_nxs")
@@ -72,6 +73,14 @@ class FeedbackHandler:
             print(f"⚠️ Error querying immediate manager email: {e}")
         return None
 
+    def verify_vapi_request():
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header != f"{FeedbackHandler.VAPI_SECRET}":
+            print("Unauthorized access attempt detected.")
+            return False
+        return True
+
+
     @staticmethod
     def paste_feedback_data(data):
 
@@ -116,24 +125,34 @@ class FeedbackHandler:
                 if domain == "cynetcorp.com":
                     EMAIL_TO_REC = "myfeedback@cynetcorp.com"
                     CC_SENIOR = os.getenv("CC_SENIOR_CORP")
+                    REVIEW_LINK= "https://tinyurl.com/cynetreview"
                     CC_MANAGER = FeedbackHandler.get_immediate_manager_email(recruiter_email)
                 elif domain == "cynetlocums.com":
                     EMAIL_TO_REC = "myfeedback@cynetlocums.com"
                     CC_MANAGER = FeedbackHandler.get_immediate_manager_email(recruiter_email)
                     CC_SENIOR = os.getenv("CC_SENIOR_LOCUMS")
+                    REVIEW_LINK= "https://app.gatherup.com/f-164844"
                 elif domain == "cynethealth.com":
                     EMAIL_TO_REC = "myfeedback@cynethealth.com"
                     CC_MANAGER = FeedbackHandler.get_immediate_manager_email(recruiter_email)
                     CC_SENIOR = os.getenv("CC_SENIOR_HEALTH")
+                    REVIEW_LINK= "https://app.gatherup.com/f-132065"
                 elif domain == "cynetsystems.com":
                     EMAIL_TO_REC = "myfeedback@cynetsystems.com"
                     CC_MANAGER = FeedbackHandler.get_immediate_manager_email(recruiter_email)
                     CC_SENIOR = os.getenv("CC_SENIOR_SYSTEMS")
+                    REVIEW_LINK= "https://app.gatherup.com/f-164843"
+                elif domain == "cynethealth.ca":
+                    EMAIL_TO_REC = "myfeedback@cynethealth.ca"
+                    CC_MANAGER = FeedbackHandler.get_immediate_manager_email(recruiter_email)
+                    # CC_SENIOR = os.getenv("CC_SENIOR_HEALTH_CA")
+                    REVIEW_LINK= "https://g.page/r/CYh2_NAwTxTrEBM/review"
             else:
                 recruiter_email = FeedbackHandler.EMAIL_TO
                 EMAIL_TO_REC = FeedbackHandler.EMAIL_TO
                 CC_MANAGER = ""
                 CC_SENIOR = ""
+                REVIEW_LINK= "https://tinyurl.com/cynetreview"
 
             if mood == "positive" or mood == "neutral":
                 # Build a proper CC list (exclude empty values)
@@ -212,7 +231,7 @@ class FeedbackHandler:
             sms_text = (
                 f"Hi {first_name}, \n \nCynet Health would appreciate your feedback. "
                 f"You can highlight our employee’s name if you wish. Please click on the link below.\n"
-                f"\nhttps://tinyurl.com/cynetreview \n \nThanks!!"
+                f"\n {REVIEW_LINK}\n \nThanks!!"
                 
             )
             FeedbackHandler.sms_queue.put({
@@ -225,7 +244,6 @@ class FeedbackHandler:
             print(f"ℹ️ SMS not sent (mood={mood}, should_send_review_link={should_send_review_link})")
 
         return jsonify({"status": "queued", "message": "Email sent, SMS queued if applicable"}), 200
-
     @staticmethod
     def process_sms_queue():
         """Background worker to send queued messages via Textline"""
