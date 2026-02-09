@@ -545,7 +545,7 @@ class FeedbackHandler:
                         EDIT_DISTANCE(LOWER(NAME), LOWER(@NAME)) <= 3
                         OR STARTS_WITH(LOWER(NAME), LOWER(@NAME))
                     )
-                    And STATUS is 'active'
+                    AND STATUS = 'active'
 
                 ORDER BY
                     PREFIX_MATCH DESC,
@@ -639,6 +639,8 @@ class FeedbackHandler:
         if number.startswith("+"):
             number = number[1:]
         return number
+
+    #Gets list of recruiters the caller previously contacted
     def get_caller_recruiter_info(body):
         try:
             call_number = body.get("message", {}).get("customer", {}).get("number")
@@ -646,7 +648,9 @@ class FeedbackHandler:
 
             toll_call = tool_calls[0] if tool_calls else {}
             toll_call_id = toll_call.get("id")
+            caller_name = toll_call.get("function", {}).get("arguments", {}).get("name", "")
 
+            # caller_name = "Dev App"
 
             call_number = FeedbackHandler.normalize_phone_number(call_number)
 
@@ -655,6 +659,7 @@ class FeedbackHandler:
 
             client = FeedbackHandler.create_bigquery_client()
             print("call number for query:", call_number)
+            print("caller name for query:", caller_name)
 
             query = """
             SELECT
@@ -678,6 +683,8 @@ class FeedbackHandler:
             WHERE
                 REGEXP_REPLACE(CAST(external_number AS STRING), r'[^0-9]', '')
                 LIKE CONCAT('%', @call_number, '%')
+                AND date_started >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 60 DAY)
+                AND LOWER(name) LIKE CONCAT('%', LOWER(@name), '%')
             )
             WHERE rn = 1
             """.format(
@@ -692,13 +699,56 @@ class FeedbackHandler:
                         "call_number",
                         "STRING",
                         str(call_number)
+                    ),
+                    bigquery.ScalarQueryParameter(
+                        "name",
+                        "STRING",
+                        str(caller_name)
+                    )
+                ]
+            )
+            
+            results = client.query(query, job_config=job_config).result()
+
+            
+            print("result is", results)
+            recruiter_data = [dict(row) for row in results]
+            print("recruiter_data is", recruiter_data)
+
+            # Second query to get text data
+            text_data_query = """
+            SELECT name,email
+            FROM `cynetdatabase.ron_data_cluster.all_text_data`
+            WHERE
+                from_phone LIKE CONCAT('%', @call_number, '%')
+                AND direction = 'internal'
+                AND LOWER(name) LIKE CONCAT('%', LOWER(@name), '%')
+                AND date >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 60 DAY)
+            """
+
+            text_data_job_config = bigquery.QueryJobConfig(
+                query_parameters=[
+                    bigquery.ScalarQueryParameter(
+                        "call_number",
+                        "STRING",
+                        str(call_number)
+                    ),
+                    bigquery.ScalarQueryParameter(
+                        "name",
+                        "STRING",
+                        str(caller_name)
                     )
                 ]
             )
 
-            results = client.query(query, job_config=job_config).result()
-            print("result is", results)
-            row =  [dict(row) for row in results]
+            text_data_results = client.query(text_data_query, job_config=text_data_job_config).result()
+            text_data = [dict(row) for row in text_data_results]
+            print("text_data is", text_data)
+
+            # Combine both recruiter_data and text_data
+            combined_data = recruiter_data + text_data
+            print("combined_data is", combined_data)
+
             return jsonify({
                 "results":[
                     {
@@ -706,7 +756,7 @@ class FeedbackHandler:
                         "result": {
                             "status": "success",
                             "message": "Recruiter identified successfully",
-                            "data": row
+                            "data": combined_data
                         }
                     }
                 ]
