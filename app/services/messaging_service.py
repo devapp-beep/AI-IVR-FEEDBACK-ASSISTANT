@@ -98,6 +98,7 @@ class FeedbackHandler:
             feedback_for = args.get("feedback_for")
             should_send_review_link = args.get("should_send_review_link", False)
             same_number = args.get("should_send_same_number", True)
+            opt_out_future_communication = str(args.get("opt_out_future_communication", "false")).lower() == "true"
             print( "[bold yellow] same_number", same_number)
             if same_number is True and call_number is not None:
                 contact_number = call_number
@@ -182,6 +183,10 @@ class FeedbackHandler:
                     cc_list.append(CC_MANAGER)
                 if CC_SENIOR:
                     cc_list.append(CC_SENIOR)
+                if opt_out_future_communication:
+                    IT_ADMIN_EMAIL = os.getenv("IT_ADMIN_EMAIL")
+                    if IT_ADMIN_EMAIL:
+                        cc_list.append(IT_ADMIN_EMAIL)
                 email_payload = {
                     "email": EMAIL_TO_REC,
                     "cc_emails": cc_list,
