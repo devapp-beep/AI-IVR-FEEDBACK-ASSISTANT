@@ -1,11 +1,13 @@
+import json
 import os
 import time
 import threading
 import queue
 import requests
 import re
-from flask import jsonify,request
+from flask import jsonify, request
 from google.cloud import bigquery
+from openai import OpenAI
 
 class FeedbackHandler:
     sms_queue = queue.Queue()
@@ -80,6 +82,55 @@ class FeedbackHandler:
             return False
         return True
 
+    @staticmethod
+    def _select_closest_match_openai(spoken_name, spoken_email, spoken_number, candidates):
+        """
+        Uses OpenAI API to select the single closest match from candidates
+        based on spoken name, email, and number.
+        Returns (candidate_dict, confidence_percent) or (None, 0) if API fails.
+        Confidence and reasoning are logged only, not included in the response.
+        """
+        api_key = os.getenv("OPENAI_API_KEY")
+    
+        if not api_key:
+            print("OPENAI_API_KEY not set, falling back to first candidate")
+            return (candidates[0], 0) if candidates else (None, 0)
+
+        try:
+            client = OpenAI(api_key=api_key)
+            prompt = f"""You are a recruiter lookup assistant. Given the user's spoken/input values and a list of candidate recruiters from the database, select the ONE closest match.
+
+User's spoken input:
+- Name: {spoken_name or '(not provided)'}
+- Email: {spoken_email or '(not provided)'}
+- Phone: {spoken_number or '(not provided)'}
+
+Candidates (0-indexed):
+{json.dumps(candidates, indent=2)}
+
+Return ONLY a JSON object with this exact format: {{"index": <0-based index of best match>, "confidence_percent": <0-100 integer>, "reasoning": "<brief explanation of why this candidate was selected>"}}
+Pick the candidate that best matches the spoken name and/or email. Prefer exact email match, then name similarity. If none match well, pick the first candidate with confidence_percent around 30-50."""
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}],
+                response_format={"type": "json_object"},
+                temperature=0,
+            )
+            content = response.choices[0].message.content
+            result = json.loads(content)
+            idx = int(result.get("index", 0))
+            idx = max(0, min(idx, len(candidates) - 1))
+            pct = result.get("confidence_percent", result.get("confidence", 0))
+            try:
+                pct = max(0, min(100, int(pct)))
+            except (TypeError, ValueError):
+                pct = 0
+            reasoning = result.get("reasoning", "")
+            print(f"Recruiter match: confidence={pct}%, reasoning={reasoning}")
+            return (candidates[idx], pct)
+        except Exception as e:
+            print(f"OpenAI selection error: {e}, falling back to first candidate")
+            return (candidates[0], 0) if candidates else (None, 0)
 
     @staticmethod
     def paste_feedback_data(data):
@@ -605,17 +656,29 @@ class FeedbackHandler:
         print("results are= ", results)
 
         # --------------------------------
-        # MULTI MATCH CONFIRMATION
+        # SELECT CLOSEST MATCH (OpenAI when multiple, else first)
         # --------------------------------
-        if len(results) > 1:
+        if len(results) == 1:
+            best_match = results[0]
+            confidence = 100  # Single match from DB
+        else:
+            best_match, confidence = FeedbackHandler._select_closest_match_openai(
+                spoken_name=spoken_name,
+                spoken_email=spoken_email,
+                spoken_number=spoken_number or (normalized_number or ""),
+                candidates=results,
+            )
+
+        if not best_match or confidence <= 50:
+            if best_match and confidence <= 50:
+                print(f"Recruiter match rejected: confidence={confidence}% (threshold 50%)")
             vapi_response = {
-                "results":[
+                "results": [
                     {
                         "toolCallId": toll_call_id,
                         "result": {
-                            "status": "confirm",
-                            "message": "Multiple recruiters found. Please confirm:",
-                            "candidates": results[:5]
+                            "status": "not_found",
+                            "message": "No recruiter found"
                         }
                     }
                 ]
@@ -632,7 +695,7 @@ class FeedbackHandler:
                     "result": {
                         "status": "success",
                         "message": "Recruiter identified successfully",
-                        "data": results[0]
+                        "data": best_match
                     }
                 }
             ]
