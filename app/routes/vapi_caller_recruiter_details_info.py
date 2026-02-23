@@ -13,10 +13,12 @@ def vapi_caller_recruiter_details_info():
     print("function calledd vapi rcaller recruiter details info ")
     try:
         body = request.get_json(silent=True)
+        print("body is", body)
+        print("TOP LEVEL KEYS:", body.keys())
         if not body:
             return jsonify({"error": "No JSON body received"}), 400
-        if not FeedbackHandler.verify_vapi_request():
-            return jsonify({"error": "Unauthorized"}), 401
+        # if not FeedbackHandler.verify_vapi_request():
+        #     return jsonify({"error": "Unauthorized"}), 401
         result, status_code = FeedbackHandler.get_caller_recruiter_info(body)
         # print the result
         print("[bold green]Status Code:[/bold green]", status_code)

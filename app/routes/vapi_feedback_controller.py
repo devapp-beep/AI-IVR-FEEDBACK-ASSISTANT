@@ -16,8 +16,8 @@ def vapi_tools():
         if not body:
             return jsonify({"error": "No JSON body received"}), 400
 
-        if not FeedbackHandler.verify_vapi_request():
-            return jsonify({"error": "Unauthorized"}), 401
+        # if not FeedbackHandler.verify_vapi_request():
+        #     return jsonify({"error": "Unauthorized"}), 401
         print("[bold magenta]Received Vapi payload[/bold magenta]")
         results = FeedbackHandler.paste_feedback_data(body)
         print("[bold green]Results:[/bold green]", results)

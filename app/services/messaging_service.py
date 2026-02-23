@@ -20,6 +20,7 @@ class FeedbackHandler:
     call_data_project = os.getenv("GCLOUD_PROJECT_CALL_DATA")
     call_data_table = os.getenv("GCLOUD_TABLE_CALL_DATA")
     VAPI_SECRET = os.getenv("VAPI_SECRET")
+    VAPI_API_TOKEN = os.getenv("VAPI_API_TOKEN")
     print("project_id", project_id)
     dataset_id = os.getenv("GCLOUD_DATASET_ID")
     table_id = os.getenv("GCLOUD_TABLE", "recruiters_nxs")
@@ -138,7 +139,12 @@ Pick the candidate that best matches the spoken name and/or email. Prefer exact 
         try:
             tool_call = data.get("message", {}).get("toolCalls", [])[0]
             args = tool_call["function"]["arguments"]
-            call_number = call_number = (data.get("message", {}).get("customer", {}).get("number"))
+            call_number = data.get("message", {}).get("customer", {}).get("number")
+            if not call_number:
+                session_id = data.get("message", {}).get("chat", {}).get("sessionId")
+                if session_id:
+                    print("No customer number in feedback payload, fetching from VAPI session:", session_id)
+                    call_number = FeedbackHandler._get_phone_from_session(session_id)
             caller_name = args.get("Name")
             contact_number = args.get("contact_number")
             mood = args.get("Mood", "").strip().lower()
@@ -263,11 +269,9 @@ Pick the candidate that best matches the spoken name and/or email. Prefer exact 
             print("❌ Missing phone number")
             return jsonify({"status": "error", "error": "Missing phone number, ask for email"}), 200
 
+        contact_number = FeedbackHandler.normalize_phone_number(contact_number)
 
-        contact_number = str(contact_number).strip()
-        if re.fullmatch(r"\d{10}", contact_number):
-            contact_number = f"+1{contact_number}"
-        elif not contact_number.startswith("+"):
+        if not contact_number.startswith("+"):
             print(f"❌ Invalid phone number format: {contact_number}")
             return {"status": "error", "message": "Invalid number, ask for email"}
         if not re.fullmatch(r"\+[1-9]\d{7,14}$", contact_number):
@@ -701,12 +705,37 @@ Pick the candidate that best matches the spoken name and/or email. Prefer exact 
             ]
         }
         return jsonify(vapi_response), 200
-    # function to normalize the call number, this should remove +  from the number if it is avaialble in the number
-    def normalize_phone_number(number):
+    def _strip_plus_from_number(number):
+        """Remove leading + from a phone number for BigQuery LIKE queries."""
         number = str(number).strip()
         if number.startswith("+"):
             number = number[1:]
         return number
+
+    @staticmethod
+    def _get_phone_from_session(session_id):
+        """Fetch the caller's phone number from the VAPI session API."""
+        try:
+            url = f"https://api.vapi.ai/session/{session_id}"
+            headers = {
+                "Authorization": f"Bearer {FeedbackHandler.VAPI_API_TOKEN}",
+                "Content-Type": "application/json"
+            }
+            response = requests.get(url, headers=headers, timeout=10)
+            print("VAPI session API response status:", response.status_code)
+            print("VAPI session API response:", response.json())
+            if response.status_code == 200:
+                session_data = response.json()
+                phone = session_data.get("customer", {}).get("number")
+                if not phone:
+                    phone = session_data.get("phoneNumber")
+                if phone:
+                    phone = FeedbackHandler._strip_plus_from_number(phone)
+                    print("Session phone after formatting:", phone)
+                    return phone
+        except Exception as e:
+            print(f"Error fetching session from VAPI: {e}")
+        return None
 
     #Gets list of recruiters the caller previously contacted
     def get_caller_recruiter_info(body):
@@ -718,9 +747,14 @@ Pick the candidate that best matches the spoken name and/or email. Prefer exact 
             toll_call_id = toll_call.get("id")
             caller_name = toll_call.get("function", {}).get("arguments", {}).get("name", "")
 
-            # caller_name = "Dev App"
+            if not call_number:
+                session_id = body.get("message", {}).get("chat", {}).get("sessionId")
+                if session_id:
+                    print("No customer number found, fetching from VAPI session:", session_id)
+                    call_number = FeedbackHandler._get_phone_from_session(session_id)
 
-            call_number = FeedbackHandler.normalize_phone_number(call_number)
+            if call_number:
+                call_number = FeedbackHandler._strip_plus_from_number(call_number)
 
             if not call_number:
                 return jsonify({"error": "Internal Server Error"}), 500
