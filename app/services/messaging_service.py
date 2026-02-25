@@ -13,7 +13,9 @@ class FeedbackHandler:
     sms_queue = queue.Queue()
     last_sms_sent = {}
     SMS_COOLDOWN_SECONDS = 100 
-    TEXTLINE_TOKEN = os.getenv("TEXTLINE_API_KEY")  # Store safely in .env
+    TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
+    TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
+    TWILIO_PHONE_NUMBER = os.getenv("TWILIO_PHONE_NUMBER")
     URL_EMAIL = os.getenv("URL_EMAIL")
     EMAIL_TO = os.getenv("EMAIL_TO")
     project_id = os.getenv("GCLOUD_PROJECT")
@@ -172,8 +174,10 @@ Pick the candidate that best matches the spoken name and/or email. Prefer exact 
             if caller_name is None or caller_name == "" or caller_name == "null" or caller_name == "Caller":
                 caller_name = "there"
             # of recruiter email incluse domain cynetcorp than i want the EMAIL_TO value to be myfeedback@cyentcorp.com if the domain is cynetlocums than i want the EMAIL_TO value to be myfeedback@cynetlocums.com if the domain is cynethealth than i want the EMAIL_TO value to be myfeedback@cynethealth.com and if cynetsystems than i want the EMAIL_TO value to be myfeedback@cynetsystems.com
+            print("recruiter_email is", recruiter_email)
             if recruiter_email:
                 domain = recruiter_email.split("@")[-1]
+                print("domain is", domain)
                 if domain == "cynetcorp.com":
                     EMAIL_TO_REC = "myfeedback@cynetcorp.com"
                     CC_SENIOR = os.getenv("CC_SENIOR_CORP")
@@ -206,13 +210,15 @@ Pick the candidate that best matches the spoken name and/or email. Prefer exact 
                 CC_SENIOR = ""
                 REVIEW_LINK= "https://tinyurl.com/cynetreview"
 
+            print(f"📋 Email routing — recruiter_email={recruiter_email}, EMAIL_TO_REC={EMAIL_TO_REC}, CC_MANAGER={CC_MANAGER}, CC_SENIOR={locals().get('CC_SENIOR', 'N/A')}")
+
             if mood == "positive" or mood == "neutral":
-                # Build a proper CC list (exclude empty values)
                 cc_list = []
                 if CC_MANAGER:
                     cc_list.append(CC_MANAGER)
                 if EMAIL_TO_REC and EMAIL_TO_REC != recruiter_email:
                     cc_list.append(EMAIL_TO_REC)
+                print(f"📬 Positive/Neutral — To: {recruiter_email}, CC: {cc_list}")
 
                 email_payload = {
                     #  use the above conditional mail here to send the mail
@@ -238,6 +244,8 @@ Pick the candidate that best matches the spoken name and/or email. Prefer exact 
                     IT_ADMIN_EMAIL = os.getenv("IT_ADMIN_EMAIL")
                     if IT_ADMIN_EMAIL:
                         cc_list.append(IT_ADMIN_EMAIL)
+                print(f"📬 Negative — To: {EMAIL_TO_REC}, CC: {cc_list}")
+
                 email_payload = {
                     "email": EMAIL_TO_REC,
                     "cc_emails": cc_list,
@@ -285,7 +293,7 @@ Pick the candidate that best matches the spoken name and/or email. Prefer exact 
         if mood == "positive" and should_send_review_link:
             first_name = caller_name.split()[0].capitalize()
             sms_text = (
-                f"Hi {first_name}, \n \nCynet Health would appreciate your feedback. "
+                f"Hi there, \n \nCynet Health would appreciate your feedback. "
                 f"You can highlight our employee’s name if you wish. Please click on the link below.\n"
                 f"\n {REVIEW_LINK}\n \nThanks!!"
                 
@@ -295,15 +303,79 @@ Pick the candidate that best matches the spoken name and/or email. Prefer exact 
                 "text": sms_text
             })
             FeedbackHandler.last_sms_sent[contact_number] = now
-            print(f"📩 Queued Textline message to {contact_number}")
+            print(f"📩 Queued Twilio SMS to {contact_number}")
         else:
             print(f"ℹ️ SMS not sent (mood={mood}, should_send_review_link={should_send_review_link})")
 
         return jsonify({"status": "queued", "message": "Email sent, SMS queued if applicable"}), 200
+
+    @staticmethod
+    def handle_twilio_incoming(data):
+        """Process incoming Twilio webhook data, log it, and forward to email."""
+        from_number = data.get("From", "Unknown")
+        to_number = data.get("To", "Unknown")
+        body = data.get("Body", "")
+        message_sid = data.get("MessageSid", "N/A")
+        account_sid = data.get("AccountSid", "N/A")
+        num_media = int(data.get("NumMedia", 0))
+
+        print(f"📥 Incoming Twilio message — SID: {message_sid}")
+        print(f"   From: {from_number}")
+        print(f"   To: {to_number}")
+        print(f"   Body: {body}")
+        print(f"   Media count: {num_media}")
+        print(f"   Full payload: {data}")
+
+        media_urls = []
+        for i in range(num_media):
+            url = data.get(f"MediaUrl{i}")
+            content_type = data.get(f"MediaContentType{i}")
+            if url:
+                media_urls.append(f"{url} ({content_type})")
+
+        email_body_parts = [
+            f"A candidate reached out to us from {from_number}.",
+        ]
+        if media_urls:
+            email_body_parts.append(f"Media: {', '.join(media_urls)}")
+
+        email_payload = {
+            "email": FeedbackHandler.EMAIL_TO,
+            "cc_emails": [],
+            "subject": f"TESTING PELASE IGNORENew SMS received from {from_number} via Feedback IVR Line",
+            "body": "\n".join(email_body_parts),
+            "summary": body,
+        }
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+        }
+
+        try:
+            email_response = requests.post(
+                FeedbackHandler.URL_EMAIL, headers=headers, json=email_payload, timeout=10
+            )
+            if email_response.status_code in [200, 201]:
+                print(f"📧 Twilio incoming data forwarded to {FeedbackHandler.EMAIL_TO}")
+            else:
+                print(f"❌ Failed to forward email: {email_response.text}")
+        except Exception as e:
+            print(f"⚠️ Error forwarding Twilio data to email: {e}")
+
+        return (
+            '<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
+            200,
+            {"Content-Type": "text/xml"},
+        )
+
     @staticmethod
     def process_sms_queue():
-        """Background worker to send queued messages via Textline"""
-        TEXTLINE_TOKEN = os.getenv("TEXTLINE_API_KEY")
+        """Background worker to send queued messages via Twilio REST API"""
+        account_sid = os.getenv("TWILIO_ACCOUNT_SID")
+        auth_token = os.getenv("TWILIO_AUTH_TOKEN")
+        from_number = os.getenv("TWILIO_PHONE_NUMBER")
+        url = f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Messages.json"
+
         while True:
             task = FeedbackHandler.sms_queue.get()
             if not task:
@@ -313,24 +385,18 @@ Pick the candidate that best matches the spoken name and/or email. Prefer exact 
             to_number = task["to"]
             text = task["text"]
 
-            print(f"📨 Sending Textline message to {to_number}")
-
-            url = "https://application.textline.com/api/conversations.json"
-            headers = {
-                "Content-Type": "application/json",
-                "X-TGP-ACCESS-TOKEN": f"{TEXTLINE_TOKEN}"
-            }
-            payload = {
-                "phone_number": to_number,
-                "group_uuid": "",
-                "comment": {"body": text},
-                "resolve": "1"
-            }
+            print(f"📨 Sending Twilio SMS to {to_number}")
 
             try:
-                response = requests.post(url, headers=headers, json=payload, timeout=15)
+                response = requests.post(
+                    url,
+                    data={"To": to_number, "From": from_number, "Body": text},
+                    auth=(account_sid, auth_token),
+                    timeout=15
+                )
                 if response.status_code in [200, 201]:
-                    print(f"✅ Message sent successfully to {to_number}")
+                    sid = response.json().get("sid", "N/A")
+                    print(f"✅ Message sent successfully to {to_number} (SID: {sid})")
                 else:
                     print(f"❌ Failed to send to {to_number}: {response.text}")
             except Exception as e:

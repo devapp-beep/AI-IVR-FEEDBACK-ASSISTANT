@@ -1,3 +1,6 @@
+from dotenv import load_dotenv
+load_dotenv()
+
 from app import create_app
 from flask_cors import CORS
 import threading
