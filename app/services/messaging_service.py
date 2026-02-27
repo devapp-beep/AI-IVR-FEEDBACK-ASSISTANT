@@ -77,6 +77,75 @@ class FeedbackHandler:
             print(f"⚠️ Error querying immediate manager email: {e}")
         return None
 
+    @staticmethod
+    def lookup_email_by_name(name):
+       """Look up a recruiter's email from BigQuery using their name (fuzzy match + AI selection)."""
+       client = FeedbackHandler.create_bigquery_client()
+       normalized = FeedbackHandler.normalize_name(name)
+
+       if not normalized:
+           return None
+
+       query = f"""
+           SELECT NAME, PRIMARY_EMAIL, PHONE_NO, STATUS
+           FROM `{FeedbackHandler.project_id}.{FeedbackHandler.dataset_id}.{FeedbackHandler.table_id}`
+           WHERE STATUS = 'active'
+             AND (
+               EDIT_DISTANCE(LOWER(NAME), LOWER(@name)) <= 5
+               OR LOWER(NAME) LIKE CONCAT('%', LOWER(@name), '%')
+               OR LOWER(@name) LIKE CONCAT('%', LOWER(NAME), '%')
+             )
+           ORDER BY EDIT_DISTANCE(LOWER(NAME), LOWER(@name)) ASC
+           LIMIT 10
+       """
+
+       job_config = bigquery.QueryJobConfig(
+           query_parameters=[
+               bigquery.ScalarQueryParameter("name", "STRING", normalized)
+           ]
+       )
+
+       try:
+           rows = list(client.query(query, job_config=job_config).result())
+           print(f"🔍 lookup_email_by_name('{name}') found {len(rows)} candidates")
+
+           if not rows:
+               return None
+
+           candidates = []
+           for row in rows:
+               candidates.append({
+                   "name": row.get("NAME"),
+                   "email": row.get("PRIMARY_EMAIL"),
+                   "number": row.get("PHONE_NO"),
+                   "status": row.get("STATUS"),
+               })
+
+           print("candidates are= ", candidates)
+
+           if len(candidates) == 1:
+               print(f"✅ Single match: {candidates[0]['email']}")
+               return candidates[0]["email"]
+
+           best_match, confidence = FeedbackHandler._select_closest_match_openai(
+               spoken_name=normalized,
+               spoken_email=None,
+               spoken_number=None,
+               candidates=candidates,
+           )
+
+           if best_match and confidence > 50:
+               print(f"✅ AI selected: {best_match['email']} (confidence={confidence}%)")
+               print("best_match is", best_match)
+            #    return best_match["email"]
+           elif best_match:
+               print(f"⚠️ AI match rejected: {best_match['email']} (confidence={confidence}%, below 50% threshold)")
+           return None
+
+       except Exception as e:
+           print(f"⚠️ Error looking up email by name: {e}")
+       return None
+
     def verify_vapi_request():
         auth_header = request.headers.get("Authorization", "")
         if auth_header != f"{FeedbackHandler.VAPI_SECRET}":
@@ -175,6 +244,14 @@ Pick the candidate that best matches the spoken name and/or email. Prefer exact 
                 caller_name = "there"
             # of recruiter email incluse domain cynetcorp than i want the EMAIL_TO value to be myfeedback@cyentcorp.com if the domain is cynetlocums than i want the EMAIL_TO value to be myfeedback@cynetlocums.com if the domain is cynethealth than i want the EMAIL_TO value to be myfeedback@cynethealth.com and if cynetsystems than i want the EMAIL_TO value to be myfeedback@cynetsystems.com
             print("recruiter_email is", recruiter_email)
+            if not recruiter_email and feedback_for:
+                print(f"🔍 No recruiter email provided. Searching BigQuery for '{feedback_for}'...")
+                recruiter_email = FeedbackHandler.lookup_email_by_name(feedback_for)
+                if recruiter_email:
+                    print(f"✅ Found email via name lookup: {recruiter_email}")
+                else:
+                    print(f"❌ No email found in BigQuery for '{feedback_for}'")
+
             if recruiter_email:
                 domain = recruiter_email.split("@")[-1]
                 print("domain is", domain)
