@@ -260,32 +260,38 @@ Pick the candidate that best matches the spoken name and/or email. Prefer exact 
                     CC_SENIOR = os.getenv("CC_SENIOR_CORP")
                     REVIEW_LINK= "https://tinyurl.com/cynetreview"
                     CC_MANAGER = FeedbackHandler.get_immediate_manager_email(recruiter_email)
+                    company_name = "Cynet Corp"
                 elif domain == "cynetlocums.com":
                     EMAIL_TO_REC = "myfeedback@cynetlocums.com"
                     CC_MANAGER = FeedbackHandler.get_immediate_manager_email(recruiter_email)
                     CC_SENIOR = os.getenv("CC_SENIOR_LOCUMS")
                     REVIEW_LINK= "https://app.gatherup.com/f-164844"
+                    company_name = "Cynet Locums"
                 elif domain == "cynethealth.com":
                     EMAIL_TO_REC = "myfeedback@cynethealth.com"
                     CC_MANAGER = FeedbackHandler.get_immediate_manager_email(recruiter_email)
                     CC_SENIOR = os.getenv("CC_SENIOR_HEALTH")
-                    REVIEW_LINK= "https://app.gatherup.com/f-132065"
+                    REVIEW_LINK= "https://tinyurl.com/cynetreview"
+                    company_name = "Cynet Health"
                 elif domain == "cynetsystems.com":
                     EMAIL_TO_REC = "myfeedback@cynetsystems.com"
                     CC_MANAGER = FeedbackHandler.get_immediate_manager_email(recruiter_email)
                     CC_SENIOR = os.getenv("CC_SENIOR_SYSTEMS")
                     REVIEW_LINK= "https://app.gatherup.com/f-164843"
+                    company_name = "Cynet Systems"
                 elif domain == "cynethealth.ca":
                     EMAIL_TO_REC = "myfeedback@cynethealth.ca"
                     CC_MANAGER = FeedbackHandler.get_immediate_manager_email(recruiter_email)
                     # CC_SENIOR = os.getenv("CC_SENIOR_HEALTH_CA")
-                    REVIEW_LINK= "https://g.page/r/CYh2_NAwTxTrEBM/review"
+                    REVIEW_LINK= "https://app.gatherup.com/f-143639"
+                    company_name = "Cynet Health"
             else:
                 recruiter_email = FeedbackHandler.EMAIL_TO
                 EMAIL_TO_REC = FeedbackHandler.EMAIL_TO
                 CC_MANAGER = ""
                 CC_SENIOR = ""
                 REVIEW_LINK= "https://tinyurl.com/cynetreview"
+                company_name = "Cynet Health"
 
             print(f"📋 Email routing — recruiter_email={recruiter_email}, EMAIL_TO_REC={EMAIL_TO_REC}, CC_MANAGER={CC_MANAGER}, CC_SENIOR={locals().get('CC_SENIOR', 'N/A')}")
 
@@ -370,7 +376,7 @@ Pick the candidate that best matches the spoken name and/or email. Prefer exact 
         if mood == "positive" and should_send_review_link:
             first_name = caller_name.split()[0].capitalize()
             sms_text = (
-                f"Hi there, \n \nCynet Health would appreciate your feedback. "
+                f"Hi there, \n \n{company_name} would appreciate your feedback. "
                 f"You can highlight our employee’s name if you wish. Please click on the link below.\n"
                 f"\n {REVIEW_LINK}\n \nThanks!!"
                 
