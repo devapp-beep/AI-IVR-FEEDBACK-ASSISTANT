@@ -137,7 +137,7 @@ class FeedbackHandler:
            if best_match and confidence > 50:
                print(f"✅ AI selected: {best_match['email']} (confidence={confidence}%)")
                print("best_match is", best_match)
-            #    return best_match["email"]
+               return best_match["email"]
            elif best_match:
                print(f"⚠️ AI match rejected: {best_match['email']} (confidence={confidence}%, below 50% threshold)")
            return None
@@ -162,6 +162,7 @@ class FeedbackHandler:
         Confidence and reasoning are logged only, not included in the response.
         """
         api_key = os.getenv("OPENAI_API_KEY")
+        print(spoken_name, spoken_email, spoken_number)
     
         if not api_key:
             print("OPENAI_API_KEY not set, falling back to first candidate")
@@ -169,6 +170,8 @@ class FeedbackHandler:
 
         try:
             client = OpenAI(api_key=api_key)
+
+            trimmed = candidates[:50]
             prompt = f"""You are a recruiter lookup assistant. Given the user's spoken/input values and a list of candidate recruiters from the database, select the ONE closest match.
 
 User's spoken input:
@@ -177,10 +180,15 @@ User's spoken input:
 - Phone: {spoken_number or '(not provided)'}
 
 Candidates (0-indexed):
-{json.dumps(candidates, indent=2)}
+{json.dumps(trimmed, indent=2, default=str)}
 
 Return ONLY a JSON object with this exact format: {{"index": <0-based index of best match>, "confidence_percent": <0-100 integer>, "reasoning": "<brief explanation of why this candidate was selected>"}}
-Pick the candidate that best matches the spoken name and/or email. Prefer exact email match, then name similarity. If none match well, pick the first candidate with confidence_percent around 30-50."""
+
+Rules:
+- Prefer exact email match, then name similarity (including phonetic/spoken variations).
+- confidence_percent MUST reflect how closely the selected candidate actually matches the spoken input. 90-100 means near-exact match, 60-80 means partial/likely match, below 50 means no good match found.
+- If NO candidate's name or email is reasonably similar to the spoken input, set confidence_percent to 0 and pick index 0 as a placeholder.
+- Do NOT inflate confidence. "Rajat" does not match "Pushpinder". Only give high confidence when the names genuinely match or are phonetic variants of each other."""
             response = client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[{"role": "user", "content": prompt}],
@@ -552,6 +560,8 @@ Pick the candidate that best matches the spoken name and/or email. Prefer exact 
         received_email = args.get("recruiterEmail", "").strip().lower()
         spoken_number = args.get("recruiterNumber", "")
         print("received_number", spoken_number)
+        print("received_email", received_email)
+        print("spoken_name", spoken_name)
         # Normalize phone number to match database format
         if spoken_number:
             normalized_number = FeedbackHandler.normalize_phone_number(spoken_number)
@@ -901,7 +911,6 @@ Pick the candidate that best matches the spoken name and/or email. Prefer exact 
                 REGEXP_REPLACE(CAST(external_number AS STRING), r'[^0-9]', '')
                 LIKE CONCAT('%', @call_number, '%')
                 AND date_started >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 60 DAY)
-                AND LOWER(name) LIKE CONCAT('%', LOWER(@name), '%')
             )
             WHERE rn = 1
             """.format(
@@ -916,11 +925,6 @@ Pick the candidate that best matches the spoken name and/or email. Prefer exact 
                         "call_number",
                         "STRING",
                         str(call_number)
-                    ),
-                    bigquery.ScalarQueryParameter(
-                        "name",
-                        "STRING",
-                        str(caller_name)
                     )
                 ]
             )
@@ -939,7 +943,6 @@ Pick the candidate that best matches the spoken name and/or email. Prefer exact 
             WHERE
                 from_phone LIKE CONCAT('%', @call_number, '%')
                 AND direction = 'internal'
-                AND LOWER(name) LIKE CONCAT('%', LOWER(@name), '%')
                 AND date >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 60 DAY)
             """
 
@@ -949,11 +952,6 @@ Pick the candidate that best matches the spoken name and/or email. Prefer exact 
                         "call_number",
                         "STRING",
                         str(call_number)
-                    ),
-                    bigquery.ScalarQueryParameter(
-                        "name",
-                        "STRING",
-                        str(caller_name)
                     )
                 ]
             )
@@ -962,17 +960,32 @@ Pick the candidate that best matches the spoken name and/or email. Prefer exact 
             text_data = [dict(row) for row in text_data_results]
             print("text_data is", text_data)
 
-            # Combine both recruiter_data and text_data
+            # Combine results and use AI to find the closest name match
             combined_data = recruiter_data + text_data
             print("combined_data is", combined_data)
+
+            if combined_data and caller_name and caller_name.strip():
+                best_match, confidence = FeedbackHandler._select_closest_match_openai(
+                    spoken_name=caller_name,
+                    spoken_email=None,
+                    spoken_number=None,
+                    candidates=combined_data,
+                )
+                print(f"AI match result: best_match={best_match}, confidence={confidence}%")
+                if best_match and confidence > 50:
+                    combined_data = [best_match]
+                    print(f"✅ Returning AI-selected match: {best_match.get('name')} ({confidence}%)")
+                else:
+                    print(f"⚠️ No confident match (confidence={confidence}%), returning empty")
+                    combined_data = []
 
             return jsonify({
                 "results":[
                     {
                         "toolCallId": toll_call_id,
                         "result": {
-                            "status": "success",
-                            "message": "Recruiter identified successfully",
+                            "status": "success" if combined_data else "not_found",
+                            "message": "Recruiter identified successfully" if combined_data else "No matching recruiter found for the given name",
                             "data": combined_data
                         }
                     }
