@@ -942,7 +942,7 @@ Rules:
             FROM `cynetdatabase.ron_data_cluster.all_text_data`
             WHERE
                 from_phone LIKE CONCAT('%', @call_number, '%')
-                AND direction = 'internal'
+                AND direction = 'external'
                 AND date >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 60 DAY)
             """
 
